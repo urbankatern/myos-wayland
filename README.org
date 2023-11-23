@@ -1,0 +1,652 @@
+#+TITLE: Install Script
+#+DESCRIPTION: A install script for the software I use. Heavily inspired by dtos: =https://gitlab.com/dtos/dtos=
+#+AUTHOR: Urban Katern
+#+PROPERTY: header-args :tangle myos
+#+auto_tangle: t
+#+STARTUP: showeverything
+
+* TABLE OF CONTENTS :toc:
+- [[#shebang-plus-comments][Shebang plus comments]]
+- [[#adding-dtos-repo-to-pacmanconf][Adding DTOS repo to pacman.conf]]
+- [[#installing-paru][Installing paru]]
+- [[#install-window-managers][Install window managers]]
+- [[#install-the-base-packages-from-repos][Install the base packages from repos]]
+- [[#copy-configs-over-from-etcdtos-into-home][Copy configs over from /etc/dtos into $HOME]]
+- [[#choosing-a-bar-for-xmonad][Choosing a bar for XMonad]]
+- [[#copy-pacman-hooks][Copy pacman hooks]]
+- [[#copy-dmscripts-config-and-set-important-variables][Copy dmscripts config and set important variables]]
+- [[#compiling-xmonad][Compiling xmonad]]
+- [[#compiling-the-xmonadctl-script][Compiling the xmonadctl script]]
+- [[#set-default-user-shell][Set default USER shell]]
+- [[#enable-sddm-for-login-manager][Enable SDDM for login manager]]
+- [[#installing-hyprland][Installing Hyprland]]
+- [[#message-stating-that-the-installation-is-complete][Message stating that the installation is complete!]]
+
+* Shebang plus comments
+
+#+begin_src bash :shebang "#!/usr/bin/env bash"
+# WARNING: Run this script at your own risk.
+# DEPENDENCIES: libnewt (probably already on the system)
+#+end_src
+
+
+* Adding DTOS repo to pacman.conf
+
+#+begin_src bash
+addrepo() { \
+    echo "#########################################################"
+    echo "## Adding the DTOS core repository to /etc/pacman.conf ##"
+    echo "#########################################################"
+    grep -qxF "[dtos-core-repo]" /etc/pacman.conf ||
+        ( echo " "; echo "[dtos-core-repo]"; echo "SigLevel = Optional DatabaseOptional"; \
+        echo "Server = https://gitlab.com/dtos/\$repo/-/raw/main/\$arch") | sudo tee -a /etc/pacman.conf
+}
+
+addrepo || error "Error adding DTOS repo to /etc/pacman.conf."
+
+#+end_src
+
+* Installing paru
+
+#+begin_src bash
+sudo pacman --noconfirm --needed -Sy dtos-core-repo/paru-bin || error "Error installing dtos-core-repo/paru-bin."
+#+end_src
+
+* Install window managers
+
+#+begin_src bash
+sudo pacman --noconfirm --needed -Sy xmonad xmonad-contrib dtos-xmonad xmobar dtos-xmobar polybar dtos-polybar
+
+sudo pacman --noconfirm --needed -Sy awesome dtos-awesome
+
+sudo pacman --noconfirm --needed -Sy bspwm sxhkd dtos-bspwm dtos-sxhkd polybar dtos-polybar
+
+sudo pacman --noconfirm --needed -Sy dtos-dwm dtos-dwmblocks && cp /etc/dtos/.config/dwm/dwm.desktop /usr/share/xsessions/dwm.desktop
+
+paru --needed --ask 4 -Sy qtile qtile-extras dtos-qtile python-psutil
+#+end_src
+
+* Install the base packages from repos
+All packages listed are either in the standard Arch repos or in the DTOS repos.  All of these will be installed using pacman.  The only program that will not be installed through pacman is Doom Emacs, which will be installed later in the script.
+
+=NOTE:= The '--ask 4' option is an undocumented option for pacman that can be found in pacman's source code (in pacman's alpm.h).  Adding this flags means that all questions about removing packages that are conflicts will automatically be answered YES.
+
+#+begin_src bash
+sudo pacman --needed --ask 4 -Sy - < pkglist.txt || error "Failed to install a required package from pkglist.txt."
+paru -Sy youtube-dl
+#+end_src
+
+* Copy configs over from /etc/dtos into $HOME
+While it would be easier to make packages that could install DTOS configs directly to the appropriate places in the $HOME folder, pacman does not allow for this.  Pacman is not allowed to touch $HOME ever!  The better way to do this is to install the configs in /etc/skel which is the standard directory to place such config files, but on many distros (for ex. Manjaro and Arco) /etc/skel is already used to store the distro's own config files.  So to avoid conflicts, all DTOS configs are placed in /etc/dtos and then copied over to $HOME.  A backup of config is created.  BEWARE!
+
+=NOTE:= The /etc/dtos directory contains files and directories that are automatically copied over to a new user's home directory when such user is created by the 'useradd' or the 'adduser' program, depending on your Linux distro.
+
+#+begin_src bash
+echo "################################################################"
+echo "## Copying DTOS configuration files from /etc/dtos into \$HOME ##"
+echo "################################################################"
+[ ! -d /etc/dtos ] && sudo mkdir /etc/dtos
+[ -d /etc/dtos ] && mkdir ~/dtos-backup-$(date +%Y.%m.%d-%H%M) && cp -Rf /etc/dtos ~/dtos-backup-$(date +%Y.%m.%d-%H%M)
+[ ! -d ~/.config ] && mkdir ~/.config
+[ -d ~/.config ] && mkdir ~/.config-backup-$(date +%Y.%m.%d-%H%M) && cp -Rf ~/.config ~/.config-backup-$(date +%Y.%m.%d-%H%M)
+cd /etc/dtos && cp -Rf . ~ && cd -
+
+find $HOME/.local/bin -type f -print0 | xargs -0 chmod 775
+#+end_src
+
+* Choosing a bar for XMonad
+
+#+begin_src bash
+if [ -d "/etc/dtos/.config/xmonad/" ]; then
+    PS3='What bar would you like to use with XMonad? (enter number): '
+    bars=("polybar" "xmobar" "both")
+    select choice in "${bars[@]}"; do
+        case $choice in
+             polybar)
+                sudo pacman -S dtos-polybar polybar
+                cp /etc/dtos/.config/xmonad/xmonad-example-configs/xmonad-with-polybar.hs $HOME/.config/xmonad/xmonad.hs
+                break
+                ;;
+             xmobar)
+                sudo pacman -S dtos-xmobar xmobar
+                cp /etc/dtos/.config/xmonad/xmonad-example-configs/xmonad-with-xmobar.hs $HOME/.config/xmonad/xmonad.hs
+                break
+                ;;
+             both)
+                sudo pacman -S dtos-polybar dtos-xmobar polybar xmobar
+                cp /etc/dtos/.config/xmonad/xmonad-example-configs/xmonad-with-polybar.hs $HOME/.config/xmonad/xmonad.hs
+                break
+                ;;
+             ,*)
+                echo "Invalid option $REPLY. You must choose a valid option."
+                ;;
+        esac
+    done
+fi
+
+#+end_src
+
+* Copy pacman hooks
+The following pacman hooks force xmonad to recompile every time there are updates to xmonad or the haskell libraries.
+
+#+begin_src bash
+[ ! -d /etc/pacman.d/hooks ] && sudo mkdir /etc/pacman.d/hooks
+sudo cp /etc/dtos/.config/xmonad/pacman-hooks/recompile-xmonad.hook /etc/pacman.d/hooks/
+sudo cp /etc/dtos/.config/xmonad/pacman-hooks/recompile-xmonadh.hook /etc/pacman.d/hooks/
+#+end_src
+
+* Copy dmscripts config and set important variables
+
+#+begin_src bash
+[ ! -d $HOME/.config/dmscripts ] && mkdir $HOME/.config/dmscripts
+cp /etc/dmscripts/config $HOME/.config/dmscripts/config
+sed -i 's/DMBROWSER=\"brave\"/DMBROWSER=\"qutebrowser\"/g' $HOME/.config/dmscripts/config
+sed -i 's/DMTERM=\"st -e\"/DMTERM=\"alacritty -e\"/g' $HOME/.config/dmscripts/config
+sed -i 's/setbg_dir=\"${HOME}\/Pictures\/Wallpapers\"/setbg_dir=\"\/usr\/share\/backgrounds\/dtos-backgrounds\"/g' $HOME/.config/dmscripts/config
+#+end_src
+
+* Compiling xmonad
+
+#+begin_src bash
+xmonad_recompile() { \
+    echo "########################"
+    echo "## Recompiling XMonad ##"
+    echo "########################"
+    xmonad --recompile
+}
+
+xmonad_recompile || echo "Recompiling Xmonad failed!"
+#+end_src
+
+* Compiling the xmonadctl script
+
+#+begin_src bash
+xmonadctl_compile() { \
+    echo "####################################"
+    echo "## Compiling the xmonadctl script ##"
+    echo "####################################"
+    ghc -dynamic "$HOME"/.config/xmonad/xmonadctl.hs
+}
+
+xmonadctl_compile || echo "Compiling the xmonadctl script failed!"
+#+end_src
+
+* Set default USER shell
+
+#+begin_src bash
+PS3='Set default user shell (enter number): '
+shells=("fish" "bash" "zsh" "quit")
+select choice in "${shells[@]}"; do
+    case $choice in
+         fish | bash | zsh)
+            sudo chsh $USER -s "/bin/$choice" && \
+            echo -e "$choice has been set as your default USER shell. \
+                    \nLogging out is required for this take effect."
+            break
+            ;;
+         quit)
+            echo "User quit without changing shell."
+            break
+            ;;
+         *)
+            echo "invalid option $REPLY"
+            ;;
+    esac
+done
+#+end_src
+
+* Enable SDDM for login manager
+
+#+begin_src bash
+# Disable the current login manager
+sudo systemctl disable $(grep '/usr/s\?bin' /etc/systemd/system/display-manager.service | awk -F / '{print $NF}') || echo "Cannot disable current display manager."
+# Enable sddm as login manager
+sudo systemctl enable sddm
+echo "###################################"
+echo "## Enable sddm as login manager. ##"
+echo "###################################"
+
+## Make multicolor-sddm-theme the default sddm theme ##
+# This is the sddm system configuration file.
+[ -f "/usr/lib/sddm/sddm.conf.d/default.conf" ] && \
+    sudo cp /usr/lib/sddm/sddm.conf.d/default.conf /usr/lib/sddm/sddm.conf.d/default.conf.backup && \
+    sudo sed -i 's/^Current=*.*/Current=multicolor-sddm-theme/g' /usr/lib/sddm/sddm.conf.d/default.conf
+
+# This is the sddm local configuration file.
+[ -f "/etc/sddm.conf" ] && \
+    sudo cp /etc/sddm.conf /etc/sddm.conf.backup && \
+    sudo sed -i 's/^Current=*.*/Current=multicolor-sddm-theme/g' /etc/sddm.conf
+
+# Create a local configuration file if it doesn't exist.
+# Standard Arch Linux does not create this file by default.
+[ ! -f "/etc/sddm.conf" ] && \
+    sudo cp /usr/lib/sddm/sddm.conf.d/default.conf /etc/sddm.conf || echo "Default sddm system config file is not found."
+
+# ArcoLinux B Awesome uses this config location.
+[ -f "/etc/sddm.conf.d/kde_settings.conf" ] && \
+    sudo cp /etc/sddm.conf.d/kde_settings.conf /etc/sddm.conf.d/kde_settings.backup && \
+    sudo sed -i 's/^Current=*.*/Current=multicolor-sddm-theme/g' /etc/sddm.conf.d/kde_settings.conf
+#+end_src
+
+* Installing Hyprland
+
+#+begin_src bash
+#!/bin/bash
+
+# HyprV4 By SolDoesTech - https://www.youtube.com/@SolDoesTech
+# License..? - You may copy, edit and ditribute this script any way you like, enjoy! :)
+
+# The follwoing will attempt to install all needed packages to run Hyprland
+# This is a quick and dirty script there are some error checking
+# IMPORTANT - This script is meant to run on a clean fresh Arch install on physical hardware
+
+# Define the software that would be inbstalled 
+#Need some prep work
+prep_stage=(
+    qt5-wayland 
+    qt5ct
+    qt6-wayland 
+    qt6ct
+    qt5-svg
+    qt5-quickcontrols2
+    qt5-graphicaleffects
+    gtk3 
+    polkit-gnome 
+    pipewire 
+    wireplumber 
+    jq 
+    wl-clipboard 
+    cliphist 
+    python-requests 
+    pacman-contrib
+)
+
+#software for nvidia GPU only
+nvidia_stage=(
+    linux-headers 
+    nvidia-dkms 
+    nvidia-settings 
+    libva 
+    libva-nvidia-driver-git
+)
+
+#the main packages
+install_stage=(
+    kitty 
+    mako 
+    waybar
+    swww 
+    swaylock-effects 
+    wofi 
+    wlogout 
+    xdg-desktop-portal-hyprland 
+    swappy 
+    grim 
+    slurp 
+    thunar 
+    btop
+    firefox
+    thunderbird
+    mpv
+    pamixer 
+    pavucontrol 
+    brightnessctl 
+    bluez 
+    bluez-utils 
+    blueman 
+    network-manager-applet 
+    gvfs 
+    thunar-archive-plugin 
+    file-roller
+    starship 
+    papirus-icon-theme 
+    ttf-jetbrains-mono-nerd 
+    noto-fonts-emoji 
+    lxappearance 
+    xfce4-settings
+    nwg-look-bin
+    sddm
+)
+
+for str in ${myArray[@]}; do
+  echo $str
+done
+
+# set some colors
+CNT="[\e[1;36mNOTE\e[0m]"
+COK="[\e[1;32mOK\e[0m]"
+CER="[\e[1;31mERROR\e[0m]"
+CAT="[\e[1;37mATTENTION\e[0m]"
+CWR="[\e[1;35mWARNING\e[0m]"
+CAC="[\e[1;33mACTION\e[0m]"
+INSTLOG="install.log"
+
+######
+# functions go here
+
+# function that would show a progress bar to the user
+show_progress() {
+    while ps | grep $1 &> /dev/null;
+    do
+        echo -n "."
+        sleep 2
+    done
+    echo -en "Done!\n"
+    sleep 2
+}
+
+# function that will test for a package and if not found it will attempt to install it
+install_software() {
+    # First lets see if the package is there
+    if yay -Q $1 &>> /dev/null ; then
+        echo -e "$COK - $1 is already installed."
+    else
+        # no package found so installing
+        echo -en "$CNT - Now installing $1 ."
+        yay -S --noconfirm $1 &>> $INSTLOG &
+        show_progress $!
+        # test to make sure package installed
+        if yay -Q $1 &>> /dev/null ; then
+            echo -e "\e[1A\e[K$COK - $1 was installed."
+        else
+            # if this is hit then a package is missing, exit to review log
+            echo -e "\e[1A\e[K$CER - $1 install had failed, please check the install.log"
+            exit
+        fi
+    fi
+}
+
+# clear the screen
+clear
+
+# set some expectations for the user
+echo -e "$CNT - You are about to execute a script that would attempt to setup Hyprland.
+Please note that Hyprland is still in Beta."
+sleep 1
+
+# attempt to discover if this is a VM or not
+echo -e "$CNT - Checking for Physical or VM..."
+ISVM=$(hostnamectl | grep Chassis)
+echo -e "Using $ISVM"
+if [[ $ISVM == *"vm"* ]]; then
+    echo -e "$CWR - Please note that VMs are not fully supported and if you try to run this on
+    a Virtual Machine there is a high chance this will fail."
+    sleep 1
+fi
+
+# let the user know that we will use sudo
+echo -e "$CNT - This script will run some commands that require sudo. You will be prompted to enter your password.
+If you are worried about entering your password then you may want to review the content of the script."
+sleep 1
+
+# give the user an option to exit out
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to continue with the install (y,n) ' CONTINST
+if [[ $CONTINST == "Y" || $CONTINST == "y" ]]; then
+    echo -e "$CNT - Setup starting..."
+    sudo touch /tmp/hyprv.tmp
+else
+    echo -e "$CNT - This script will now exit, no changes were made to your system."
+    exit
+fi
+
+# find the Nvidia GPU
+if lspci -k | grep -A 2 -E "(VGA|3D)" | grep -iq nvidia; then
+    ISNVIDIA=true
+else
+    ISNVIDIA=false
+fi
+
+### Disable wifi powersave mode ###
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to disable WiFi powersave? (y,n) ' WIFI
+if [[ $WIFI == "Y" || $WIFI == "y" ]]; then
+    LOC="/etc/NetworkManager/conf.d/wifi-powersave.conf"
+    echo -e "$CNT - The following file has been created $LOC.\n"
+    echo -e "[connection]\nwifi.powersave = 2" | sudo tee -a $LOC &>> $INSTLOG
+    echo -en "$CNT - Restarting NetworkManager service, Please wait."
+    sleep 2
+    sudo systemctl restart NetworkManager &>> $INSTLOG
+    
+    #wait for services to restore (looking at you DNS)
+    for i in {1..6} 
+    do
+        echo -n "."
+        sleep 1
+    done
+    echo -en "Done!\n"
+    sleep 2
+    echo -e "\e[1A\e[K$COK - NetworkManager restart completed."
+fi
+
+#### Check for package manager ####
+if [ ! -f /sbin/yay ]; then  
+    echo -en "$CNT - Configuering yay."
+    git clone https://aur.archlinux.org/yay.git &>> $INSTLOG
+    cd yay
+    makepkg -si --noconfirm &>> ../$INSTLOG &
+    show_progress $!
+    if [ -f /sbin/yay ]; then
+        echo -e "\e[1A\e[K$COK - yay configured"
+        cd ..
+        
+        # update the yay database
+        echo -en "$CNT - Updating yay."
+        yay -Suy --noconfirm &>> $INSTLOG &
+        show_progress $!
+        echo -e "\e[1A\e[K$COK - yay updated."
+    else
+        # if this is hit then a package is missing, exit to review log
+        echo -e "\e[1A\e[K$CER - yay install failed, please check the install.log"
+        exit
+    fi
+fi
+
+
+
+### Install all of the above pacakges ####
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to install the packages? (y,n) ' INST
+if [[ $INST == "Y" || $INST == "y" ]]; then
+
+    # Prep Stage - Bunch of needed items
+    echo -e "$CNT - Prep Stage - Installing needed components, this may take a while..."
+    for SOFTWR in ${prep_stage[@]}; do
+        install_software $SOFTWR 
+    done
+
+    # Setup Nvidia if it was found
+    if [[ "$ISNVIDIA" == true ]]; then
+        echo -e "$CNT - Nvidia GPU support setup stage, this may take a while..."
+        for SOFTWR in ${nvidia_stage[@]}; do
+            install_software $SOFTWR
+        done
+    
+        # update config
+        sudo sed -i 's/MODULES=()/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
+        sudo mkinitcpio --config /etc/mkinitcpio.conf --generate /boot/initramfs-custom.img
+        echo -e "options nvidia-drm modeset=1" | sudo tee -a /etc/modprobe.d/nvidia.conf &>> $INSTLOG
+    fi
+
+    # Install the correct hyprland version
+    echo -e "$CNT - Installing Hyprland, this may take a while..."
+    if [[ "$ISNVIDIA" == true ]]; then
+        #check for hyprland and remove it so the -nvidia package can be installed
+        if yay -Q hyprland &>> /dev/null ; then
+            yay -R --noconfirm hyprland &>> $INSTLOG &
+        fi
+        install_software hyprland-nvidia
+    else
+        install_software hyprland
+    fi
+
+    # Stage 1 - main components
+    echo -e "$CNT - Installing main components, this may take a while..."
+    for SOFTWR in ${install_stage[@]}; do
+        install_software $SOFTWR 
+    done
+
+    # Start the bluetooth service
+    echo -e "$CNT - Starting the Bluetooth Service..."
+    sudo systemctl enable --now bluetooth.service &>> $INSTLOG
+    sleep 2
+
+    # Enable the sddm login manager service
+    echo -e "$CNT - Enabling the SDDM Service..."
+    sudo systemctl enable sddm &>> $INSTLOG
+    sleep 2
+    
+    # Clean out other portals
+    echo -e "$CNT - Cleaning out conflicting xdg portals..."
+    yay -R --noconfirm xdg-desktop-portal-gnome xdg-desktop-portal-gtk &>> $INSTLOG
+fi
+
+### Copy Config Files ###
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to copy config files? (y,n) ' CFG
+if [[ $CFG == "Y" || $CFG == "y" ]]; then
+    echo -e "$CNT - Copying config files..."
+
+    # copy the HyprV directory
+    cp -R HyprV ~/.config/
+
+    #set the measuring unit
+    echo -e "$CNT - Attempring to set mesuring unit..."
+    if locale -a | grep -q ^en_US; then
+        echo -e "$COK - Setting mesuring system to imperial..."
+        ln -sf ~/.config/HyprV/waybar/conf/mesu-imp.jsonc ~/.config/HyprV/waybar/conf/mesu.jsonc
+        sed -i 's/SET_MESU=""/SET_MESU="I"/' ~/.config/HyprV/hyprv.conf
+    else
+        echo -e "$COK - Setting mesuring system to metric..."
+        sed -i 's/SET_MESU=""/SET_MESU="M"/' ~/.config/HyprV/hyprv.conf
+        ln -sf ~/.config/HyprV/waybar/conf/mesu-met.jsonc ~/.config/HyprV/waybar/conf/mesu.jsonc
+    fi
+
+    # Setup each appliaction
+    # check for existing config folders and backup 
+    for DIR in hypr kitty mako swaylock waybar wlogout wofi 
+    do 
+        DIRPATH=~/.config/$DIR
+        if [ -d "$DIRPATH" ]; then 
+            echo -e "$CAT - Config for $DIR located, backing up."
+            mv $DIRPATH $DIRPATH-back &>> $INSTLOG
+            echo -e "$COK - Backed up $DIR to $DIRPATH-back."
+        fi
+
+        # make new empty folders
+        mkdir -p $DIRPATH &>> $INSTLOG
+    done
+
+    # link up the config files
+    echo -e "$CNT - Setting up the new config..." 
+    cp ~/.config/HyprV/hypr/* ~/.config/hypr/
+    ln -sf ~/.config/HyprV/kitty/kitty.conf ~/.config/kitty/kitty.conf
+    ln -sf ~/.config/HyprV/mako/conf/config-dark ~/.config/mako/config
+    ln -sf ~/.config/HyprV/swaylock/config ~/.config/swaylock/config
+    ln -sf ~/.config/HyprV/waybar/conf/v4-config.jsonc ~/.config/waybar/config.jsonc
+    ln -sf ~/.config/HyprV/waybar/style/v4-style-dark.css ~/.config/waybar/style.css
+    ln -sf ~/.config/HyprV/wlogout/layout ~/.config/wlogout/layout
+    ln -sf ~/.config/HyprV/wofi/config ~/.config/wofi/config
+    ln -sf ~/.config/HyprV/wofi/style/v4-style-dark.css ~/.config/wofi/style.css
+
+
+    # add the Nvidia env file to the config (if needed)
+    if [[ "$ISNVIDIA" == true ]]; then
+        echo -e "\nsource = ~/.config/hypr/env_var_nvidia.conf" >> ~/.config/hypr/hyprland.conf
+    fi
+
+    # Copy the SDDM theme
+    echo -e "$CNT - Setting up the login screen."
+    sudo cp -R Extras/sdt /usr/share/sddm/themes/
+    sudo chown -R $USER:$USER /usr/share/sddm/themes/sdt
+    sudo mkdir /etc/sddm.conf.d
+    echo -e "[Theme]\nCurrent=sdt" | sudo tee -a /etc/sddm.conf.d/10-theme.conf &>> $INSTLOG
+    WLDIR=/usr/share/wayland-sessions
+    if [ -d "$WLDIR" ]; then
+        echo -e "$COK - $WLDIR found"
+    else
+        echo -e "$CWR - $WLDIR NOT found, creating..."
+        sudo mkdir $WLDIR
+    fi 
+    
+    # stage the .desktop file
+    sudo cp Extras/hyprland.desktop /usr/share/wayland-sessions/
+
+    # setup the first look and feel as dark
+    xfconf-query -c xsettings -p /Net/ThemeName -s "Adwaita-dark"
+    xfconf-query -c xsettings -p /Net/IconThemeName -s "Papirus-Dark"
+    gsettings set org.gnome.desktop.interface gtk-theme "Adwaita-dark"
+    gsettings set org.gnome.desktop.interface icon-theme "Papirus-Dark"
+    cp -f ~/.config/HyprV/backgrounds/v4-background-dark.jpg /usr/share/sddm/themes/sdt/wallpaper.jpg
+fi
+
+### Install the starship shell ###
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to activate the starship shell? (y,n) ' STAR
+if [[ $STAR == "Y" || $STAR == "y" ]]; then
+    # install the starship shell
+    echo -e "$CNT - Hansen Crusher, Engage!"
+    echo -e "$CNT - Updating .bashrc..."
+    echo -e '\neval "$(starship init bash)"' >> ~/.bashrc
+    echo -e "$CNT - copying starship config file to ~/.config ..."
+    cp Extras/starship.toml ~/.config/
+fi
+
+### Install software for Asus ROG laptops ###
+read -rep $'[\e[1;33mACTION\e[0m] - For ASUS ROG Laptops - Would you like to install Asus ROG software support? (y,n) ' ROG
+if [[ $ROG == "Y" || $ROG == "y" ]]; then
+    echo -e "$CNT - Adding Keys..."
+    sudo pacman-key --recv-keys 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
+    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
+    sudo pacman-key --lsign-key 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
+    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
+
+    LOC="/etc/pacman.conf"
+    echo -e "$CNT - Updating $LOC with g14 repo."
+    echo -e "\n[g14]\nServer = https://arch.asus-linux.org" | sudo tee -a $LOC &>> $INSTLOG
+    echo -e "$CNT - Update the system..."
+    sudo pacman -Suy --noconfirm &>> $INSTLOG
+
+    echo -e "$CNT - Installing ROG pacakges..."
+    install_software asusctl
+    install_software supergfxctl
+    install_software rog-control-center
+
+    echo -e "$CNT - Activating ROG services..."
+    sudo systemctl enable --now power-profiles-daemon.service &>> $INSTLOG
+    sleep 2
+    sudo systemctl enable --now supergfxd &>> $INSTLOG
+    sleep 2
+
+    # add the ROG keybinding file to the config
+    echo -e "\nsource = ~/.config/hypr/rog-g15-strix-2021-binds.conf" >> ~/.config/hypr/hyprland.conf
+fi
+
+### Script is done ###
+echo -e "$CNT - Script had completed!"
+if [[ "$ISNVIDIA" == true ]]; then 
+    echo -e "$CAT - Since we attempted to setup an Nvidia GPU the script will now end and you should reboot.
+    Please type 'reboot' at the prompt and hit Enter when ready."
+    exit
+fi
+
+read -rep $'[\e[1;33mACTION\e[0m] - Would you like to start Hyprland now? (y,n) ' HYP
+if [[ $HYP == "Y" || $HYP == "y" ]]; then
+    exec sudo systemctl start sddm &>> $INSTLOG
+else
+    exit
+fi
+#+end_src
+
+* Message stating that the installation is complete!
+
+#+begin_src bash
+echo "##############################"
+echo "## MYOS has been installed! ##"
+echo "##############################"
+
+while true; do
+    read -p "Do you want to reboot to get your myos? [Y/n] " yn
+    case $yn in
+        [Yy]* ) reboot;;
+        [Nn]* ) break;;
+        "" ) reboot;;
+        * ) echo "Please answer yes or no.";;
+    esac
+done
+#+end_src
